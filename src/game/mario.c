@@ -789,17 +789,23 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
 
         case ACT_BACKFLIP:
             m->marioObj->header.gfx.animInfo.animID = -1;
-            m->forwardVel = -16.0f;
-            set_mario_y_vel_based_on_fspeed(m, 62.0f, 0.0f);
+            m->forwardVel = -18.0f;
+            set_mario_y_vel_based_on_fspeed(m, 70.0f, 0.0f);
             break;
 
         case ACT_TRIPLE_JUMP:
-            set_mario_y_vel_based_on_fspeed(m, 69.0f, 0.0f);
-            m->forwardVel *= 0.8f;
+            set_mario_y_vel_based_on_fspeed(m, 75.0f, 0.15f);
             break;
 
         case ACT_FLYING_TRIPLE_JUMP:
             set_mario_y_vel_based_on_fspeed(m, 82.0f, 0.0f);
+            break;
+            
+        case ACT_SPIN_JUMP:
+            if (actionArg == 0) {
+                set_mario_y_vel_based_on_fspeed(m, 70.0f, 0.25f);
+                m->forwardVel *= 0.8f;
+            }
             break;
 
         case ACT_WATER_JUMP:
@@ -835,7 +841,7 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
             break;
 
         case ACT_SIDE_FLIP:
-            set_mario_y_vel_based_on_fspeed(m, 62.0f, 0.0f);
+            set_mario_y_vel_based_on_fspeed(m, 70.0f, 0.0f);
             m->forwardVel = 8.0f;
             m->faceAngle[1] = m->intendedYaw;
             break;
@@ -854,7 +860,7 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
             break;
 
         case ACT_DIVE:
-            if ((fowardVel = m->forwardVel + 15.0f) > 48.0f) {
+            if ((fowardVel = m->forwardVel + 15.0f) > 48.0f || actionArg == 0) { //In Sunshine, dives set horizontal speed to 48 immediately.
                 fowardVel = 48.0f;
             }
             mario_set_forward_vel(m, fowardVel);
@@ -881,6 +887,11 @@ static u32 set_mario_action_airborne(struct MarioState *m, u32 action, u32 actio
 
         case ACT_JUMP_KICK:
             m->vel[1] = 20.0f;
+            break;
+        
+        case ACT_JUMP_ROLLOUT:
+            mario_set_forward_vel(m, 55.0f);
+            m->vel[1] = 38.0f;
             break;
     }
 
@@ -1193,6 +1204,27 @@ s32 set_water_plunge_action(struct MarioState *m) {
 }
 
 /**
+ * Checks if the control stick is being spun. This is bitwise.
+ */
+s32 input_spinning(struct MarioState *m) {
+    u8 spin;
+    s32 i;
+    if (m->input & INPUT_NONZERO_ANALOG) {
+        spin = 0;
+        for (i = 0; i < 10; i++) {
+            if (!(((m->inputSpin) >> (i * 3)) & 4)) //Check for the "input bit". If it's 0, then there's no point.
+                return FALSE;
+            
+            spin = spin & (1 << (((m->inputSpin) >> (i * 3)) & 3)); //Set the propert bit of spin to 1
+        }
+        if (spin == 0xF) //0xF = 1111. This should be true if ALL FOUR input bits are 1.
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/**
  * These are the scaling values for the x and z axis for Mario
  * when he is close to unsquishing.
  */
@@ -1299,12 +1331,15 @@ void update_mario_joystick_inputs(struct MarioState *m) {
     } else {
         m->intendedMag = mag / 8.0f;
     }
-
+    
     if (m->intendedMag > 0.0f) {
         m->intendedYaw = atan2s(-controller->stickY, controller->stickX) + m->area->camera->yaw;
         m->input |= INPUT_NONZERO_ANALOG;
+        m->inputSpin = (m->inputSpin << 3) & (4 + (m->intendedYaw >> 14)); //Records previous 10 quadrants of input, in the form of 4 + input quadrant
+        
     } else {
         m->intendedYaw = m->faceAngle[1];
+        m->inputSpin = 0;
     }
 }
 
@@ -1813,6 +1848,8 @@ void init_mario(void) {
 
     gMarioState->capTimer = 0;
     gMarioState->quicksandDepth = 0.0f;
+    
+    gMarioState->inputSpin = 0;
 
     gMarioState->heldObj = NULL;
     gMarioState->riddenObj = NULL;
